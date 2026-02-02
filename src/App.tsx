@@ -1,14 +1,16 @@
 import { Container, Title } from '@mantine/core'
 import { useXTerm, XTerm } from 'react-xtermjs'
 import { useEffect, useRef } from 'react'
-import { validations } from './validations'
+import { validateStep1, validateStep2 } from './validations'
 import chalk from 'chalk'
 
 function App() {
 	const { instance, ref } = useXTerm()
-	const step = useRef<1 | 2 | 3>(1)
+	const step = useRef<1 | 2>(1)
 	const packageId = useRef<number>(1)
 	const numberOfPackages = useRef<number>(0)
+	const costOfDelivery = useRef<number>(0)
+	const results = useRef<string>('')
 	const inputBuffer = useRef<string>('')
 
 	useEffect(() => {
@@ -23,15 +25,21 @@ function App() {
 				inputBuffer.current = inputBuffer.current.slice(0, -1)
 				instance.write('\b \b')
 			} else if (data === '\r') {
-				const error = validations[step.current](inputBuffer.current, v => {
-					numberOfPackages.current = Number(v)
-				})
+				const error = {
+					1: validateStep1(inputBuffer.current, (cost, number) => {
+						costOfDelivery.current = cost
+						numberOfPackages.current = number
+					}),
+					2: validateStep1(inputBuffer.current, result => {
+						results.current.concat(`\r\nPKG${packageId} ${result}`)
+					}),
+				}[step.current]
 				inputBuffer.current = ''
 				if (error) {
 					instance.writeln(
 						`${chalk.red(error)}\r
-\r
-${commands[step.current](packageId.current)}`,
+						\r
+						${commands[step.current](packageId.current)}`,
 					)
 					return
 				}
@@ -43,15 +51,19 @@ ${commands[step.current](packageId.current)}`)
 					return
 				}
 
-				if (packageId < numberOfPackages) {
-					packageId.current++
-					instance.writeln(commands[step.current](packageId.current))
-					return
+				if (step.current === 2) {
+					if (packageId < numberOfPackages) {
+						packageId.current++
+						instance.writeln(commands[step.current](packageId.current))
+						return
+					} else if (packageId === numberOfPackages) {
+						instance.writeln(results.current)
+						step.current = 1
+						packageId.current = 0
+						numberOfPackages.current = 0
+						results.current = ''
+					}
 				}
-
-				step.current = 1
-				packageId.current = 0
-				numberOfPackages.current = 0
 			} else {
 				instance.write(data)
 				inputBuffer.current += data

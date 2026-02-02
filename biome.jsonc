@@ -18,5 +18,12 @@
 			"semicolons": "asNeeded",
 			"arrowParentheses": "asNeeded"
 		}
+	},
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "off"
+			}
+		}
 	}
 }

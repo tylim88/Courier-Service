@@ -1,70 +1,58 @@
 import { tuple, coerce, enum as enum_, type ZodError } from 'zod'
 
 const schema = coerce.number().int().min(1)
-export const validations = {
-	1: (value: string, callback: (numberOfPackages: number) => void) => {
-		const inputs = value.split(' ')
-		const error = tuple([schema, schema]).safeParse(inputs).error
 
-		if (error) {
-			return error.issues.reduce((acc, { code, message, path }) => {
-				return `${acc}\r
-\r
-code: ${code}\r
-argument: ${['cost of delivery', 'number of packages'][Number(path[0])]}\r
-path: ${Number(path[0]) + 1}\r
-message: ${message.split(',')[0]}, received "${value}"\r`
-			}, '')
-		} else {
-			callback(Number(inputs[1]))
-			return ''
-		}
-	},
-	2: (value: string, callback: (v: number) => void) => {
-		const inputs = value.split(' ')
-		const error = tuple([
-			schema,
-			schema,
-			enum_(Object.keys(codes) as [keyof typeof codes]).optional(),
+export const validateStep1 = (
+	value: string,
+	callback: (costOfDelivery: number, numberOfPackages: number) => void,
+) => {
+	const inputs = value.split(' ')
+	const error = tuple([schema, schema]).safeParse(inputs).error
+
+	if (error) {
+		return constructErrorString(error, [
+			'cost of delivery',
+			'number of packages',
 		])
-			.superRefine(([weight, distance, code], ctx) => {
-				if (!code) return
-				const data = { weight, distance }
-				;(Object.keys(data) as [keyof typeof data]).forEach(key => {
-					const max = codes[code][`${key}_max`]
-
-					if (data[key] > max) {
-						ctx.addIssue({
-							code: 'too_big',
-							maximum: max,
-							input: data[key],
-							inclusive: true,
-							origin: 'number',
-							message: `expect the ${key} to be less than ${max}${units[key]}, but received ${data[key]}${units[key]}`,
-						})
-					}
-
-					const min = codes[code][`${key}_min`]
-					if (data[key] < min) {
-						ctx.addIssue({
-							code: 'too_small',
-							minimum: max,
-							input: data[key],
-							inclusive: true,
-							origin: 'number',
-							message: `expect the ${key} to be more than ${max}${units[key]}, but received ${data[key]}${units[key]}`,
-						})
-					}
-				})
-			})
-			.safeParse(inputs).error
-		if (error) {
-		} else {
-			return ''
-		}
-	},
-	// value and callback of step 3 are dummy parameters
-	3: (value: string, callback: (v: number) => void) => '',
+	} else {
+		callback(Number(inputs[0]), Number(inputs[1]))
+		return ''
+	}
+}
+export const validateStep2 = (
+	value: string,
+	callback: (result: string) => void,
+) => {
+	const inputs = value.split(' ')
+	const error = tuple([
+		schema,
+		schema,
+		enum_(Object.keys(offers) as [keyof typeof offers]).optional(),
+	])
+		.refine(([weight, distance, offer]) => {
+			const data = { weight, distance }
+			const applicable = offer
+				? (Object.keys(data) as [keyof typeof data]).reduce((acc, key) => {
+						return (
+							acc &&
+							data[key] > offers[offer][`${key}_max`] &&
+							data[key] < offers[offer][`${key}_min`]
+						)
+					}, true)
+				: true
+			const costWithoutDiscount = weight * 10 + distance * 5
+			const discount = applicable && offer ? offers[offer].discount : 0
+			callback(
+				`${costWithoutDiscount * (1 - discount)} ${costWithoutDiscount * discount}`,
+			)
+			return true
+		})
+		.safeParse(inputs).error
+	if (error) {
+		return constructErrorString(error, ['weight', 'distance', 'offer'])
+	} else {
+		return ''
+	}
 }
 
 const units = {
@@ -72,20 +60,23 @@ const units = {
 	weight: 'kg',
 }
 
-const codes = {
+const offers = {
 	OFR001: {
+		discount: 0.1,
 		distance_min: 0,
 		distance_max: 200,
 		weight_min: 70,
 		weight_max: 200,
 	},
 	OFR002: {
+		discount: 0.07,
 		distance_min: 50,
 		distance_max: 150,
 		weight_min: 100,
 		weight_max: 250,
 	},
 	OFR003: {
+		discount: 0.05,
 		distance_min: 50,
 		distance_max: 250,
 		weight_min: 10,
@@ -93,16 +84,13 @@ const codes = {
 	},
 }
 
-const constrcutErrorString = (
-	error: ZodError<[number, number]>,
-	value: string,
-) => {
+const constructErrorString = (error: ZodError<any>, arguments_: string[]) => {
 	return error.issues.reduce((acc, { code, message, path }) => {
 		return `${acc}\r
 \r
 code: ${code}\r
-argument: ${['cost of delivery', 'number of packages'][Number(path[0])]}\r
+argument: ${arguments_[Number(path[0])]}\r
 path: ${Number(path[0]) + 1}\r
-message: ${message.split(',')[0]}, received "${value}"\r`
+message: ${message.split(',')}"\r`
 	}, '')
 }
