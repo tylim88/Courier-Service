@@ -29,23 +29,40 @@ export const validateStep2 = (
 		schema,
 		enum_(Object.keys(offers) as [keyof typeof offers]).optional(),
 	])
-		.refine(([weight, distance, offer]) => {
+		.superRefine(([weight, distance, offer], ctx) => {
+			if (!offer) return
 			const data = { weight, distance }
-			const applicable = offer
-				? (Object.keys(data) as [keyof typeof data]).reduce((acc, key) => {
-						return (
-							acc &&
-							data[key] > offers[offer][`${key}_max`] &&
-							data[key] < offers[offer][`${key}_min`]
-						)
-					}, true)
-				: true
+			;(Object.keys(data) as [keyof typeof data]).forEach(key => {
+				const max = offers[offer][`${key}_max`]
+
+				if (data[key] > max) {
+					ctx.addIssue({
+						code: 'too_big',
+						maximum: max,
+						input: data[key],
+						inclusive: true,
+						origin: 'number',
+						message: `expect the ${key} to be less than ${max}${units[key]}, but received ${data[key]}${units[key]}`,
+					})
+				}
+
+				const min = offers[offer][`${key}_min`]
+				if (data[key] < min) {
+					ctx.addIssue({
+						code: 'too_small',
+						minimum: max,
+						input: data[key],
+						inclusive: true,
+						origin: 'number',
+						message: `expect the ${key} to be more than ${min}${units[key]}, but received ${data[key]}${units[key]}`,
+					})
+				}
+			})
 			const costWithoutDiscount = weight * 10 + distance * 5
-			const discount = applicable && offer ? offers[offer].discount : 0
+			const discount = offer ? offers[offer].discount : 0
 			callback(
-				`${costWithoutDiscount * (1 - discount)} ${costWithoutDiscount * discount}`,
+				`${costWithoutDiscount * discount} ${costWithoutDiscount * (1 - discount)}`,
 			)
-			return true
 		})
 		.safeParse(inputs).error
 	if (error) {
@@ -88,9 +105,9 @@ const constructErrorString = (error: ZodError<any>, arguments_: string[]) => {
 	return error.issues.reduce((acc, { code, message, path }) => {
 		return `${acc}\r
 \r
-code: ${code}\r
-argument: ${arguments_[Number(path[0])]}\r
-path: ${Number(path[0]) + 1}\r
-message: ${message.split(',')}"\r`
+code: ${code}\r${
+			path.length ? `argument: ${arguments_[Number(path[0])]}\r` : ''
+		}
+message: ${message}\r`
 	}, '')
 }

@@ -30,16 +30,17 @@ function App() {
 						costOfDelivery.current = cost
 						numberOfPackages.current = number
 					}),
-					2: validateStep1(inputBuffer.current, result => {
-						results.current.concat(`\r\nPKG${packageId} ${result}`)
+					2: validateStep2(inputBuffer.current, result => {
+						results.current = `${results.current}\r
+PKG${packageId.current} ${result}`
 					}),
 				}[step.current]
 				inputBuffer.current = ''
 				if (error) {
 					instance.writeln(
 						`${chalk.red(error)}\r
-						\r
-						${commands[step.current](packageId.current)}`,
+\r
+${commands[step.current](packageId.current)}`,
 					)
 					return
 				}
@@ -50,18 +51,25 @@ function App() {
 ${commands[step.current](packageId.current)}`)
 					return
 				}
-
 				if (step.current === 2) {
-					if (packageId < numberOfPackages) {
+					if (packageId.current < numberOfPackages.current) {
 						packageId.current++
-						instance.writeln(commands[step.current](packageId.current))
+						instance.writeln(
+							`\r\n\r\n${commands[step.current](packageId.current)}`,
+						)
 						return
-					} else if (packageId === numberOfPackages) {
-						instance.writeln(results.current)
+					} else if (packageId.current === numberOfPackages.current) {
+						const output = results.current
 						step.current = 1
-						packageId.current = 0
+						packageId.current = 1
+						costOfDelivery.current = 0
 						numberOfPackages.current = 0
 						results.current = ''
+						instance.writeln(`\r
+\r
+${chalk.greenBright(`Final Output:${output}\r`)}
+\r
+${commands[step.current]()}`)
 					}
 				}
 			} else {
