@@ -1,13 +1,14 @@
-import { tuple, coerce, enum as enum_, type ZodError } from 'zod'
-
-const schema = coerce.number().int().min(1)
+import { tuple, enum as enum_ } from 'zod'
+import { constructErrorString, positiveIntegerSchema } from './__utils'
 
 export const validateStep1 = (
 	value: string,
 	callback: (costOfDelivery: number, numberOfPackages: number) => void,
 ) => {
-	const inputs = value.split(' ')
-	const error = tuple([schema, schema]).safeParse(inputs).error
+	const inputs = value.trim().split(' ')
+	const error = tuple([positiveIntegerSchema, positiveIntegerSchema]).safeParse(
+		inputs,
+	).error
 
 	if (error) {
 		return constructErrorString(error, [
@@ -21,19 +22,22 @@ export const validateStep1 = (
 }
 export const validateStep2 = (
 	value: string,
+	basicCost: number,
 	callback: (result: string) => void,
 ) => {
-	const inputs = value.split(' ')
+	const inputs = value.trim().split(' ')
 	const error = tuple([
-		schema,
-		schema,
+		positiveIntegerSchema,
+		positiveIntegerSchema.max(17208, {
+			error:
+				'17208km is the longest straight line distance on earth between 2 points',
+		}),
 		enum_(Object.keys(offers) as [keyof typeof offers]).optional(),
 	])
 		.superRefine(([weight, distance, offer], ctx) => {
-			if (!offer) return
 			const data = { weight, distance }
 			;(Object.keys(data) as [keyof typeof data]).forEach(key => {
-				const max = offers[offer][`${key}_max`]
+				const max = offer ? offers[offer][`${key}_max`] : Infinity
 
 				if (data[key] > max) {
 					ctx.addIssue({
@@ -46,7 +50,7 @@ export const validateStep2 = (
 					})
 				}
 
-				const min = offers[offer][`${key}_min`]
+				const min = offer ? offers[offer][`${key}_min`] : -Infinity
 				if (data[key] < min) {
 					ctx.addIssue({
 						code: 'too_small',
@@ -58,10 +62,10 @@ export const validateStep2 = (
 					})
 				}
 			})
-			const costWithoutDiscount = weight * 10 + distance * 5
+			const costWithoutDiscount = basicCost + weight * 10 + distance * 5
 			const discount = offer ? offers[offer].discount : 0
 			callback(
-				`${costWithoutDiscount * discount} ${costWithoutDiscount * (1 - discount)}`,
+				`${parseFloat((costWithoutDiscount * discount).toFixed(2))} ${parseFloat((costWithoutDiscount * (1 - discount)).toFixed(2))}`,
 			)
 		})
 		.safeParse(inputs).error
@@ -99,15 +103,4 @@ const offers = {
 		weight_min: 10,
 		weight_max: 150,
 	},
-}
-
-const constructErrorString = (error: ZodError<any>, arguments_: string[]) => {
-	return error.issues.reduce((acc, { code, message, path }) => {
-		return `${acc}\r
-\r
-code: ${code}\r${
-			path.length ? `argument: ${arguments_[Number(path[0])]}\r` : ''
-		}
-message: ${message}\r`
-	}, '')
 }

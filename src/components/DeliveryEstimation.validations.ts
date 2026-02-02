@@ -1,13 +1,14 @@
-import { tuple, coerce, enum as enum_, type ZodError } from 'zod'
-
-const schema = coerce.number().int().min(1)
+import { tuple, enum as enum_ } from 'zod'
+import { constructErrorString, positiveIntegerSchema } from './__utils'
 
 export const validateStep1 = (
 	value: string,
 	callback: (costOfDelivery: number, numberOfPackages: number) => void,
 ) => {
-	const inputs = value.split(' ')
-	const error = tuple([schema, schema]).safeParse(inputs).error
+	const inputs = value.trim().split(' ')
+	const error = tuple([positiveIntegerSchema, positiveIntegerSchema]).safeParse(
+		inputs,
+	).error
 
 	if (error) {
 		return constructErrorString(error, [
@@ -21,19 +22,28 @@ export const validateStep1 = (
 }
 export const validateStep2 = (
 	value: string,
-	callback: (result: string) => void,
+	basicCost: number,
+	id: number,
+	callback: (
+		costEstimation: Record<
+			'weight' | 'distance' | 'costWithoutDiscount' | 'discount' | 'id',
+			number
+		>,
+	) => void,
 ) => {
-	const inputs = value.split(' ')
+	const inputs = value.trim().split(' ')
 	const error = tuple([
-		schema,
-		schema,
+		positiveIntegerSchema,
+		positiveIntegerSchema.max(17208, {
+			error:
+				'17208km is the longest straight line distance on earth between 2 points',
+		}),
 		enum_(Object.keys(offers) as [keyof typeof offers]).optional(),
 	])
 		.superRefine(([weight, distance, offer], ctx) => {
-			if (!offer) return
 			const data = { weight, distance }
 			;(Object.keys(data) as [keyof typeof data]).forEach(key => {
-				const max = offers[offer][`${key}_max`]
+				const max = offer ? offers[offer][`${key}_max`] : Infinity
 
 				if (data[key] > max) {
 					ctx.addIssue({
@@ -46,7 +56,7 @@ export const validateStep2 = (
 					})
 				}
 
-				const min = offers[offer][`${key}_min`]
+				const min = offer ? offers[offer][`${key}_min`] : -Infinity
 				if (data[key] < min) {
 					ctx.addIssue({
 						code: 'too_small',
@@ -58,18 +68,148 @@ export const validateStep2 = (
 					})
 				}
 			})
-			const costWithoutDiscount = weight * 10 + distance * 5
+			const costWithoutDiscount = basicCost + weight * 10 + distance * 5
 			const discount = offer ? offers[offer].discount : 0
-			callback(
-				`${costWithoutDiscount * discount} ${costWithoutDiscount * (1 - discount)}`,
-			)
+			callback({ id, weight, distance, costWithoutDiscount, discount })
 		})
 		.safeParse(inputs).error
+
+	return error
+		? constructErrorString(error, ['weight', 'distance', 'offer'])
+		: ''
+}
+
+export const validateStep3 = async (
+	value: string,
+	costEstimations: Record<
+		'weight' | 'distance' | 'costWithoutDiscount' | 'discount' | 'id',
+		number
+	>[],
+	callback: (deliveryEstimations: string) => void,
+) => {
+	const inputs = value.trim().split(' ')
+	const { error, data } = tuple([
+		positiveIntegerSchema,
+		positiveIntegerSchema,
+		positiveIntegerSchema,
+	]).safeParse(inputs)
+
 	if (error) {
-		return constructErrorString(error, ['weight', 'distance', 'offer'])
-	} else {
-		return ''
+		return constructErrorString(error, [
+			'number of vehicle',
+			'maximum speed',
+			'maximum carriable weight',
+		])
 	}
+	const [numberOfVehicle, maxSpeed, maxWeight] = data
+
+	let filteredAndSortedByWeight = costEstimations.filter(
+		({ weight }) => weight <= maxWeight,
+	)
+
+	const bestCombination = () => {
+		let bestCombination: { weight: number; distance: number }[] = []
+		let maxWeightReached = 0
+
+		const findSubsets = (
+			start: number,
+			currentSubset: { weight: number; distance: number }[],
+			currentWeight: number,
+		) => {
+			if (
+				currentSubset.length > bestCombination.length ||
+				(currentSubset.length === bestCombination.length &&
+					currentWeight > maxWeightReached)
+			) {
+				bestCombination = [...currentSubset]
+				maxWeightReached = currentWeight
+			}
+
+			for (let i = start; i < filteredAndSortedByWeight.length; i++) {
+				if (currentWeight + filteredAndSortedByWeight[i].weight <= maxWeight) {
+					currentSubset.push(filteredAndSortedByWeight[i])
+					findSubsets(
+						i + 1,
+						currentSubset,
+						currentWeight + filteredAndSortedByWeight[i].weight,
+					)
+					currentSubset.pop() // Backtrack
+				}
+			}
+		}
+
+		findSubsets(0, [], 0)
+		return bestCombination
+	}
+
+	const vehicles = [...Array(numberOfVehicle)].map(() => ({
+		consumedTime: 0,
+		packages: [] as { output: string; id: number }[],
+	}))
+
+	while (filteredAndSortedByWeight.length) {
+		vehicles
+			.sort((a, b) => a.consumedTime - b.consumedTime)
+			.forEach(vehicles => {
+				const { maxSingleTripTime, processedId } =
+					filteredAndSortedByWeight.reduce(
+						(acc, { costWithoutDiscount, discount, distance, id, weight }) => {
+							if (acc.totalWeight + weight <= maxWeight) {
+								acc.totalWeight += weight
+								acc.processedId[id] = true
+
+								const singleTripTime = parseFloat(
+									(Math.floor((distance / maxSpeed) * 100) / 100).toFixed(2),
+								)
+
+								acc.maxSingleTripTime = Math.max(
+									acc.maxSingleTripTime,
+									singleTripTime,
+								)
+								console.log(
+									`PKG${id} ${parseFloat((costWithoutDiscount * discount).toFixed(2))} ${parseFloat((costWithoutDiscount * (1 - discount)).toFixed(2))} ${parseFloat((vehicles.consumedTime + singleTripTime).toFixed(2))}`,
+								)
+								vehicles.packages.push({
+									id,
+									output: `PKG${id} ${parseFloat((costWithoutDiscount * discount).toFixed(2))} ${parseFloat((costWithoutDiscount * (1 - discount)).toFixed(2))} ${parseFloat((vehicles.consumedTime + singleTripTime).toFixed(2))}`,
+								})
+							}
+							return acc
+						},
+						{
+							processedId: {} as Record<number, true>,
+							totalWeight: 0,
+							maxSingleTripTime: 0,
+						},
+					)
+				vehicles.consumedTime += maxSingleTripTime * 2
+				filteredAndSortedByWeight = filteredAndSortedByWeight.filter(
+					({ id }) => !processedId[id],
+				)
+			})
+		await new Promise(res => {
+			// prevent while loop from exhausting cpu resource if something went wrong
+			setTimeout(() => {
+				res(1)
+			}, 100)
+		})
+	}
+	const output = vehicles
+		.reduce(
+			(acc, { packages }) => {
+				return [...acc, ...packages]
+			},
+			[] as { output: string; id: number }[],
+		)
+		.sort((a, b) => {
+			return a.id - b.id
+		})
+		.reduce(
+			(acc, { output }) => `${acc}\r
+${output}`,
+			'',
+		)
+	callback(output)
 }
 
 const units = {
@@ -99,15 +239,4 @@ const offers = {
 		weight_min: 10,
 		weight_max: 150,
 	},
-}
-
-const constructErrorString = (error: ZodError<any>, arguments_: string[]) => {
-	return error.issues.reduce((acc, { code, message, path }) => {
-		return `${acc}\r
-\r
-code: ${code}\r${
-			path.length ? `argument: ${arguments_[Number(path[0])]}\r` : ''
-		}
-message: ${message}\r`
-	}, '')
 }

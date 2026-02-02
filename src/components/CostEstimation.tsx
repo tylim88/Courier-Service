@@ -2,10 +2,11 @@ import { useXTerm } from 'react-xtermjs'
 import { useEffect, useRef } from 'react'
 import { validateStep1, validateStep2 } from './CostEstimation.validations'
 import chalk from 'chalk'
-import { Title } from '@mantine/core'
+import { FitAddon } from '@xterm/addon-fit'
 
 export const CostEstimation = () => {
 	const { instance, ref } = useXTerm()
+	const fitAddonRef = useRef(new FitAddon())
 	const step = useRef<1 | 2>(1)
 	const packageId = useRef<number>(1)
 	const numberOfPackages = useRef<number>(0)
@@ -15,6 +16,8 @@ export const CostEstimation = () => {
 
 	useEffect(() => {
 		if (!instance) return
+		instance.loadAddon(fitAddonRef.current)
+		setTimeout(() => fitAddonRef.current.fit(), 100)
 		instance.writeln(
 			`Welcome, Employee K001\r\n\r\n${commands[step.current](packageId.current)}`,
 		)
@@ -26,15 +29,21 @@ export const CostEstimation = () => {
 				instance.write('\b \b')
 			} else if (data === '\r') {
 				const error = {
-					1: validateStep1(inputBuffer.current, (cost, number) => {
-						costOfDelivery.current = cost
-						numberOfPackages.current = number
-					}),
-					2: validateStep2(inputBuffer.current, result => {
-						results.current = `${results.current}\r
+					1: () =>
+						validateStep1(inputBuffer.current, (cost, number) => {
+							costOfDelivery.current = cost
+							numberOfPackages.current = number
+						}),
+					2: () =>
+						validateStep2(
+							inputBuffer.current,
+							costOfDelivery.current,
+							result => {
+								results.current = `${results.current}\r
 PKG${packageId.current} ${result}`
-					}),
-				}[step.current]
+							},
+						),
+				}[step.current]()
 				inputBuffer.current = ''
 				if (error) {
 					instance.writeln(
@@ -79,24 +88,18 @@ ${commands[step.current]()}`)
 		})
 	}, [instance])
 
-	return (
-		<>
-			<Title>Kiki's Courier Service</Title>
-			<div ref={ref} style={{ width: '100%' }} />
-		</>
-	)
+	return <div ref={ref} style={{ width: '100%' }} />
 }
 
 const commands = {
 	1: () =>
-		chalk.yellow(`1. Please enter the basic delivery cost and number of input separate by a space,\r
+		chalk.yellow(`1. Please enter the basic delivery cost and number of packages separate by a space,\r
 example: 100 3\r
 where 100 is the basic delivery cost and 3 is the number of packages.\r
 ${chalk.green('input: basicDeliveryCost numberOfPackages')}`),
 	2: (number: number) =>
-		chalk.cyan(`2.${number} Please enter the weight, distance and offer code of package ${chalk.yellow(`ID ${number}`)} separated by a space\r
+		chalk.cyan(`2.${number} Please enter the weight, distance and offer code of package ${chalk.yellow(`ID ${number}`)} separate by a space\r
 example: 5 15 OFR001\r
 where 5 is weight(kg), 15 is distance(km) and OFR001 is an offer code (if available)\r
 ${chalk.green('input:weight(kg) distance(km) offer(optional)')}`),
-	3: () => 'Final Cost:\r\n',
 }
